@@ -23,9 +23,6 @@ burglaries_geo <- st_as_sf(burglaries |> drop_na(latitude),
 ```{r}
 burglaries_census <- st_join(census_tract, burglaries_geo, join = st_contains)
 ```
-```{r}
-burglaries_census
-```
 
 ```{r}
 burglaries_census |> 
@@ -33,6 +30,7 @@ burglaries_census |>
   nrow()
  
 ```
+
 ```{r}
 str(census)
 ```
@@ -44,6 +42,7 @@ str(burglaries_census)
 burglaries_census <- inner_join(burglaries_census, census, join_by(STATEFP == state, COUNTYFP == county, TRACTCE == tract))
 ```
 
+
 ### Part 2 - Exploratory Analysis
 
 Perform some exploraty analysis on your prepared dataset.
@@ -54,15 +53,8 @@ Which census tract had the highest number of burglaries? Which census tract had 
 
 We're interested in the relationship between median income and number of aggravated burglaries, so examine those variables on their own and together to see what you can find. You may want to perform additional calculations, create plots, etc.
 
+`
 
-```{r}
-burglaries_census |> 
-  st_drop_geometry() |>
-  group_by(TRACTCE) |> 
-  distinct(incident_number) |>
-  count(name = "num_incidents") |> 
-  arrange(num_incidents)
-```
 ```{r}
 burglaries_census |> 
   st_drop_geometry() |>
@@ -71,6 +63,137 @@ burglaries_census |>
   count(name = "num_incidents") |> 
   arrange(desc(num_incidents))
 ```
+```{r}
+Burglaries_Per_Capita <- burglaries_census |> 
+  st_drop_geometry() |>
+  group_by(TRACTCE, population, median_income) |> 
+  distinct(incident_number) |>
+  count(name = "num_incidents") |> 
+  mutate(burglaries_per_1000_residents = (1000*num_incidents)/population) 
+  
+```
+We're interested in the relationship between median income and number of aggravated burglaries, so examine those variables on their own and together to see what you can find. You may want to perform additional calculations, create plots, etc.
+```{r}
+Burglaries_Per_Capita
+```
+```{r}
+Burglaries_Per_Capita |> 
+  pull(num_incidents) 
+  
+```
+
+```{r}
+Burglaries_Per_Capita <- Burglaries_Per_Capita |> 
+  filter(population > 0) |> 
+  filter(median_income > 0)
+```
+```{r}
+Burglaries_Per_Capita
+```
+
+
+```{r}
+Burglaries_Per_Capita |> 
+  ggplot(aes(x = median_income)) +
+  geom_histogram(bins = 30, color = 'black') +
+  labs(title = "Median Income")
+```
+```{r}
+Burglaries_Per_Capita |> 
+  filter(population < 7500) |>
+  ggplot(aes(x = population)) +
+  geom_histogram(bins = 30, color = 'black') +
+  labs(title = "Population")
+```
+
+
+```{r}
+Burglaries_Per_Capita |> 
+  #filter(num_incidents < 30) |> 
+  filter(median_income > 0) |> 
+  ggplot(aes(x = median_income, y = burglaries_per_1000_residents)) +
+   geom_point()
+```
+
+
+```{r}
+Burglaries_Per_Capita |> 
+  filter( population < 7500) |> 
+  ggplot(aes(x = population, y = median_income)) +
+   geom_point()
+```
+```{r}
+Burglaries_Per_Capita |> 
+   filter(num_incidents < 30) |>  
+  filter(population < 7500) |> 
+  ggplot(aes(x = population, y = burglaries_per_1000_residents)) +
+   geom_point()
+```
+
+
+
+
+
+
+
+
+
+
+
+### Part 3 - Statistical Modeling
+Fit a Poisson regression model with target variable the rate of burglaries per census tract and with predictor the median income. Offset using the log of the population so that we are looking at the rate of burglaries per population instead of the number of burglaries. How can you interpret the meaning of the output? How do the estimates from the model compare to the observed data?
+```{r}
+test <- glm('num_incidents~ median_income',
+               data = Burglaries_Per_Capita,
+               family = poisson)
+summary(test)
+```
+
+```{r}
+est_df <- tibble(
+  median_income = seq(from = min(Burglaries_Per_Capita$median_income, na.rm = TRUE), 
+                          to = max(Burglaries_Per_Capita$median_income, na.rm = TRUE), 
+                          length.out = 100)
+    )
+
+est_df <- est_df |> 
+  bind_cols(predict(test, newdata = est_df, type = "response")) |> 
+  rename("Estimated Number of Burglaries" = "...2")
+            
+est_df |> 
+  ggplot(aes(x = `Estimated Number of Burglaries` , y = median_income)) +
+  geom_line()
+```
+
+
+```{r}
+test2 <- 
+  
+  glm('num_incidents~ median_income',
+               data = Burglaries_Per_Capita,
+               family = poisson,
+              offset = log(population))
+summary(test2)
+```
+```{r}
+est_df <- tibble(
+  median_income = seq(from = min(Burglaries_Per_Capita$median_income, na.rm = TRUE), 
+                          to = max(Burglaries_Per_Capita$median_income, na.rm = TRUE), 
+                          length.out = 100),
+  population = 1000
+    )
+
+est_df <- est_df |> 
+  bind_cols(predict(test2, newdata = est_df, type = "response")) |> 
+  rename("Burglaries Per tract per Population of 1000" = "...3")
+
+Burglaries_Per_Capita |> 
+  ggplot(aes(x = median_income, y = burglaries_per_1000_residents)) +
+  geom_point() +
+  geom_line(data = est_df, aes(x = median_income, y = `Burglaries Per tract per Population of 1000`))
+```
+
+
 
 
 
